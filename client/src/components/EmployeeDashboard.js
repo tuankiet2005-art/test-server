@@ -1,0 +1,498 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { logout } from '../services/auth';
+import api from '../services/auth';
+import './Dashboard.css';
+
+function EmployeeDashboard({ user, setUser }) {
+  const [leaveRequests, setLeaveRequests] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [formData, setFormData] = useState({
+    date: '',
+    timePeriod: 'all day',
+    reason: ''
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
+  });
+  const [passwordError, setPasswordError] = useState('');
+  const [passwordSuccess, setPasswordSuccess] = useState('');
+  const [salaryInfo, setSalaryInfo] = useState(null);
+  const [advanceRequests, setAdvanceRequests] = useState([]);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    fetchLeaveRequests();
+    fetchSalaryInfo();
+    fetchAdvanceRequests();
+  }, []);
+
+  // No separate useEffect needed because calculateCurrentSalary is called during render
+
+  const fetchLeaveRequests = async () => {
+    try {
+      const response = await api.get('/leave-requests');
+      setLeaveRequests(response.data);
+    } catch (err) {
+      console.error('Error fetching leave requests:', err);
+    }
+  };
+
+  const fetchSalaryInfo = async () => {
+    try {
+      const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+      console.log('Fetching salary for month:', currentMonth);
+      const response = await api.get(`/users/me/salary/${currentMonth}`);
+      console.log('Salary API response:', response.data);
+      const salary = response.data?.salary;
+      console.log('Parsed salary:', salary);
+      setSalaryInfo({
+        month: currentMonth,
+        totalSalary: salary && salary > 0 ? salary : 0
+      });
+    } catch (err) {
+      console.error('Error fetching salary info:', err);
+      console.error('Error response:', err.response?.data);
+      const currentMonth = new Date().toISOString().slice(0, 7);
+      setSalaryInfo({
+        month: currentMonth,
+        totalSalary: 0
+      });
+    }
+  };
+
+  const fetchAdvanceRequests = async () => {
+    try {
+      const response = await api.get('/advance-requests');
+      setAdvanceRequests(response.data || []);
+    } catch (err) {
+      console.error('Error fetching advance requests:', err);
+      setAdvanceRequests([]);
+    }
+  };
+
+  const calculateCurrentSalary = () => {
+    if (!salaryInfo || !salaryInfo.totalSalary || salaryInfo.totalSalary <= 0) {
+      return null;
+    }
+
+    const today = new Date();
+    const daysInMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
+    const currentDay = today.getDate(); // Number of days from the beginning of the month until today
+
+    // Daily wage = Total salary / Total days in the month
+    const dailySalary = salaryInfo.totalSalary / daysInMonth;
+
+    // Calculate the advanced amount in the month
+    const currentMonthStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0');
+    const monthStart = new Date(currentMonthStr + '-01');
+    monthStart.setHours(0, 0, 0, 0);
+    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
+    monthEnd.setHours(23, 59, 59, 999);
+    const todayStart = new Date(today);
+    todayStart.setHours(0, 0, 0, 0);
+
+    const advanceAmount = (advanceRequests || [])
+      .filter(req => {
+        if (!req || req.status !== 'approved') return false;
+        const reqDate = new Date(req.submittedAt);
+        reqDate.setHours(0, 0, 0, 0);
+        return reqDate >= monthStart && reqDate <= monthEnd;
+      })
+      .reduce((sum, req) => sum + (req.amount || 0), 0);
+
+    // Calculate number of days off in the month (only count up to today)
+    // Logic: Count total off shifts, 2 shifts = 1 day, 1 shift = 0.5 days
+    let leaveShifts = 0; // Total off shifts
+    (leaveRequests || []).forEach(req => {
+      if (!req || req.status !== 'approved' || !req.date) return;
+
+      // Parse date string (format: YYYY-MM-DD) into Date object
+      const dateStr = req.date;
+      const [year, month, day] = dateStr.split('-').map(Number);
+      const leaveDate = new Date(year, month - 1, day);
+      leaveDate.setHours(0, 0, 0, 0);
+
+      // Only count days off within the current month and <= today
+      if (leaveDate >= monthStart && leaveDate <= todayStart) {
+        const timePeriod = (req.timePeriod || 'all day').toLowerCase();
+        if (timePeriod === 'all day') {
+          leaveShifts += 2; // Full day off = 2 shifts
+        } else if (timePeriod === 'morning' || timePeriod === 'afternoon' ||
+          timePeriod === 'morning shift' || timePeriod === 'afternoon shift') {
+          leaveShifts += 1; // 1 shift off = 1 shift
+        }
+      }
+    });
+
+    // Calculate number of days off: 2 shifts = 1 day, 1 shift = 0.5 days
+    // Example: 1 shift = 0.5 days, 2 shifts = 1 day, 3 shifts = 1.5 days, 4 shifts = 2 days
+    // Formula: number of days = number of shifts / 2
+    const leaveDays = leaveShifts / 2;
+
+    // Current salary = ((Total salary / Total days in the month) × Number of days from the beginning of the month until today) - Advanced amount - (Number of days off × Daily wage)
+    const leaveDeduction = leaveDays * dailySalary;
+    const currentSalary = (dailySalary * currentDay) - advanceAmount - leaveDeduction;
+
+    // Maximum advanceable salary = Current salary - (4 days' wage)
+    // Note: This may be a negative number
+    const fourDaysSalary = 4 * dailySalary;
+    const maxAdvanceAmount = currentSalary - fourDaysSalary;
+
+    return {
+      totalSalary: salaryInfo.totalSalary,
+      daysInMonth,
+      currentDay,
+      dailySalary: Math.ceil(dailySalary),
+      advanceAmount: Math.ceil(advanceAmount),
+      leaveDays,
+      leaveDeduction: Math.ceil(leaveDeduction),
+      currentSalary: Math.ceil(currentSalary), // Could be negative
+      fourDaysSalary: Math.ceil(fourDaysSalary),
+      maxAdvanceAmount: Math.ceil(maxAdvanceAmount) // Could be negative
+    };
+  };
+
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      await api.post('/leave-requests', formData);
+      setShowForm(false);
+      setFormData({ date: '', timePeriod: 'all day', reason: '' });
+      fetchLeaveRequests();
+    } catch (err) {
+      setError(err.response?.data?.error || 'An error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Employees cannot delete orders
+  const handleDelete = async (id) => {
+    alert('You do not have the authority to cancel your leave request. Please contact your manager.');
+  };
+
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPasswordError('');
+    setPasswordSuccess('');
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setPasswordError('The new password and the confirm password do not match.');
+      return;
+    }
+
+    if (passwordForm.newPassword.length < 6) {
+      setPasswordError('The new password must have at least 6 characters.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await api.patch('/users/change-password', {
+        currentPassword: passwordForm.currentPassword,
+        newPassword: passwordForm.newPassword
+      });
+      setPasswordSuccess('Password changed successfully!');
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setTimeout(() => {
+        setShowChangePassword(false);
+        setPasswordSuccess('');
+      }, 2000);
+    } catch (err) {
+      setPasswordError(err.response?.data?.error || 'An error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = () => {
+    logout();
+    setUser(null);
+    navigate('/login');
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'approved': return '#4caf50';
+      case 'rejected': return '#ff9800';
+      default: return '#ff9800';
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'approved': return 'Approved';
+      case 'rejected': return 'Rejected';
+      default: return 'Waiting for approval';
+    }
+  };
+
+  return (
+    <div className="dashboard">
+      <header className="dashboard-header">
+        <div>
+          <h1>Hello, {user.name}</h1>
+          <p>Employee</p>
+        </div>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button
+            onClick={() => setShowChangePassword(!showChangePassword)}
+            className="primary-button"
+            style={{ background: '#2196F3' }}
+          >
+            Change password
+          </button>
+          <button onClick={handleLogout} className="logout-button">
+            Log out
+          </button>
+        </div>
+      </header>
+
+      <div className="dashboard-content">
+        <div className="dashboard-card" style={{ marginBottom: '20px', background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', color: 'white' }}>
+          <div className="card-header" style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
+            <h2 style={{ color: 'white', margin: 0 }}>Current monthly salary</h2>
+          </div>
+          <div style={{ padding: '20px' }}>
+            {(() => {
+              const salaryCalc = calculateCurrentSalary();
+              if (!salaryCalc) {
+                return (
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <div style={{ fontSize: '18px', opacity: 0.9 }}>
+                      Salary information for this month is not yet available. Please contact management to arrange your salary.
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Total monthly salary</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                      {new Intl.NumberFormat('vi-VN').format(salaryCalc.totalSalary)} VNĐ
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Daily wage</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                      {new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.dailySalary))} VNĐ
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Number of days in the month (counting from the beginning of the month)</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold' }}>
+                      {salaryCalc.currentDay} / {salaryCalc.daysInMonth} days
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Number of days off</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ff9800' }}>
+                      {salaryCalc.leaveDays} days
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Amount advanced</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ffd700' }}>
+                      {new Intl.NumberFormat('vi-VN').format(salaryCalc.advanceAmount)} VNĐ
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Except for leave of absence</div>
+                    <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ff9800' }}>
+                      -{new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.leaveDeduction))} VNĐ
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Current salary (as of today{salaryCalc.currentDay}/{new Date().getMonth() + 1})</div>
+                    <div style={{ fontSize: '32px', fontWeight: 'bold', color: salaryCalc.currentSalary >= 0 ? '#ffd700' : '#ff6b6b' }}>
+                      {new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.currentSalary))} VNĐ
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: '1 / -1', paddingTop: '15px', borderTop: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.1)', borderRadius: '8px', padding: '15px' }}>
+                    <div style={{ fontSize: '14px', opacity: 0.9, marginBottom: '5px' }}>Maximum advance payment (Current salary - 4 days' salary)</div>
+                    <div style={{ fontSize: '28px', fontWeight: 'bold', color: salaryCalc.maxAdvanceAmount >= 0 ? '#4ade80' : '#ff6b6b' }}>
+                      {new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.maxAdvanceAmount))} VNĐ
+                    </div>
+                    <div style={{ fontSize: '12px', opacity: 0.8, marginTop: '8px' }}>
+                      (Current salary: {new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.currentSalary))} VNĐ -
+                      4 days' salary: {new Intl.NumberFormat('vi-VN').format(Math.round(salaryCalc.fourDaysSalary))} VNĐ)
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+
+        {showChangePassword && (
+          <div className="dashboard-card" style={{ marginBottom: '20px' }}>
+            <div className="card-header">
+              <h2>Change password</h2>
+              <button
+                onClick={() => {
+                  setShowChangePassword(false);
+                  setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                  setPasswordError('');
+                  setPasswordSuccess('');
+                }}
+                className="logout-button"
+              >
+                Close
+              </button>
+            </div>
+            <form onSubmit={handleChangePassword} className="leave-form">
+              {passwordError && <div className="error-message">{passwordError}</div>}
+              {passwordSuccess && <div style={{ background: '#d4edda', color: '#155724', padding: '12px', borderRadius: '8px', marginBottom: '20px' }}>{passwordSuccess}</div>}
+
+              <div className="form-group">
+                <label>Current password</label>
+                <input
+                  type="password"
+                  value={passwordForm.currentPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, currentPassword: e.target.value })}
+                  required
+                  placeholder="Enter current password"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>New password</label>
+                <input
+                  type="password"
+                  value={passwordForm.newPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, newPassword: e.target.value })}
+                  required
+                  placeholder="Enter a new password (minimum 6 characters)"
+                  minLength="6"
+                />
+              </div>
+
+              <div className="form-group">
+                <label>Confirm new password</label>
+                <input
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                  onChange={(e) => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })}
+                  required
+                  placeholder="Enter new password"
+                />
+              </div>
+
+              <button type="submit" disabled={loading} className="primary-button">
+                {loading ? 'Changing...' : 'Change to new password'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        <div className="dashboard-card">
+          <div className="card-header">
+            <h2>My leave request</h2>
+            <button onClick={() => setShowForm(!showForm)} className="primary-button">
+              {showForm ? 'Cancel' : '+ Create new'}
+            </button>
+          </div>
+
+          {showForm && (
+            <form onSubmit={handleSubmit} className="leave-form">
+              {error && <div className="error-message">{error}</div>}
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Day off</label>
+                  <input
+                    type="date"
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Shift off</label>
+                  <select
+                    value={formData.timePeriod}
+                    onChange={(e) => setFormData({ ...formData, timePeriod: e.target.value })}
+                    required
+                  >
+                    <option value="all day">All day</option>
+                    <option value="morning">Morning</option>
+                    <option value="afternoon">Afternoon</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Reason</label>
+                <textarea
+                  value={formData.reason}
+                  onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
+                  rows="4"
+                  placeholder="Enter reason for leave (optional)..."
+                />
+              </div>
+
+              <button type="submit" disabled={loading} className="primary-button">
+                {loading ? 'Sending...' : 'Send'}
+              </button>
+            </form>
+          )}
+
+          <div className="requests-list">
+            {leaveRequests.length === 0 ? (
+              <p className="empty-message">No leave requests have been submitted yet.</p>
+            ) : (
+              leaveRequests.map((request) => (
+                <div key={request.id} className="request-card">
+                  <div className="request-header">
+                    <div>
+                      <h3>Leave of absence request</h3>
+                      <p className="request-date">
+                        {request.date ? new Date(request.date).toLocaleDateString('en-US') :
+                          request.startDate ? new Date(request.startDate).toLocaleDateString('en-US') : ''}
+                        {request.timePeriod && ` (${request.timePeriod})`}
+                        {request.startTimePeriod && !request.timePeriod && ` (${request.startTimePeriod})`}
+                        {request.endDate && request.startDate !== request.endDate &&
+                          ` - ${new Date(request.endDate).toLocaleDateString('en-US')}`}
+                        {request.endTimePeriod && request.startTimePeriod !== request.endTimePeriod &&
+                          !request.timePeriod && ` (${request.endTimePeriod})`}
+                      </p>
+                    </div>
+                    <span
+                      className="status-badge"
+                      style={{ backgroundColor: getStatusColor(request.status) }}
+                    >
+                      {getStatusText(request.status)}
+                    </span>
+                  </div>
+                  <p className="request-reason">{request.reason}</p>
+                  <div className="request-footer">
+                    <span className="request-time">
+                      Send at: {new Date(request.submittedAt).toLocaleString('en-US')}
+                    </span>
+                    <span className="locked-badge">Approved</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default EmployeeDashboard;
+
