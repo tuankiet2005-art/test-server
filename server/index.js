@@ -11,22 +11,46 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'Group_6';
 
-// Middleware
-app.use(cors({
-    origin: [
-        'http://localhost:3000',
-        'http://localhost:3001',
-        'https://leave-management-qn2zpwb9m-tuankiet2005-arts-projects.vercel.app' // Thay bằng domain Vercel của bạn sau khi deploy
-    ],
-    credentials: true
-}));
+// ==================== CORS CONFIGURATION ====================
+// Danh sách origins được phép
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://leave-management-qn2zpwb9m-tunakiet2005-arts-projects.vercel.app',
+    'https://leave-management-backend-oyyw.onrender.com'
+];
 
-// Thêm route kiểm tra health
-app.get('/api/health', (req, res) => {
-    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+// CORS middleware
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    
+    // Log để debug
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+    console.log('Origin:', origin);
+    
+    // Cho phép requests từ allowed origins
+    if (origin && allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+    }
+    
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+        console.log('✅ Preflight request handled');
+        return res.sendStatus(200);
+    }
+    
+    next();
 });
+
+// Body parser middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+
+// ==================== MIDDLEWARE ====================
 
 // Authentication middleware
 async function authenticateToken(req, res, next) {
@@ -54,35 +78,55 @@ async function isManager(req, res, next) {
     next();
 }
 
+// ==================== TEST ROUTES ====================
+
+// Health check (không cần auth)
+app.get('/api/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        message: 'Server is running!',
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// Test CORS (không cần auth)
+app.get('/api/test', (req, res) => {
+    res.json({ 
+        message: 'CORS is working!',
+        origin: req.headers.origin || 'No origin',
+        method: req.method
+    });
+});
+
 // ==================== AUTH ROUTES ====================
 
-// Login
 // Login
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-
+        
         console.log('🔍 Login attempt:', username);
-
+        
         const result = await query(
             'SELECT id, username, password, name, role FROM users WHERE username = $1',
             [username]
         );
-
+        
         const user = result.rows[0];
-
+        
         if (!user) {
             console.log('❌ User not found');
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
-
+        
         console.log('✅ User found, comparing password...');
-
-        // SO SÁNH ĐÚNG CÁCH - DÙNG bcrypt.compareSync
+        
+        // So sánh password
         const isValid = bcrypt.compareSync(password, user.password);
-
+        
         console.log('🔍 Password valid:', isValid);
-
+        
         if (!isValid) {
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
@@ -115,12 +159,12 @@ app.get('/api/me', authenticateToken, async (req, res) => {
             'SELECT id, username, name, role FROM users WHERE id = $1',
             [req.user.id]
         );
-
+        
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found.' });
         }
-
+        
         res.json(user);
     } catch (err) {
         console.error('Get current user error:', err);
@@ -145,7 +189,7 @@ app.patch('/api/users/change-password', authenticateToken, async (req, res) => {
             'SELECT password FROM users WHERE id = $1',
             [req.user.id]
         );
-
+        
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -184,13 +228,13 @@ app.post('/api/users', authenticateToken, isManager, async (req, res) => {
             'SELECT id FROM users WHERE username = $1',
             [username]
         );
-
+        
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'Username already exists.' });
         }
 
         const hashedPassword = bcrypt.hashSync(password, 10);
-
+        
         const result = await query(
             `INSERT INTO users (username, password, name, role) 
              VALUES ($1, $2, $3, 'employee') 
@@ -225,7 +269,7 @@ app.post('/api/users/bulk-setup', authenticateToken, isManager, async (req, res)
                 'SELECT id FROM users WHERE username = $1',
                 [emp.username]
             );
-
+            
             if (existing.rows.length === 0) {
                 const result = await query(
                     `INSERT INTO users (username, password, name, role) 
@@ -273,7 +317,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-
+        
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -283,7 +327,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
                 'SELECT id FROM users WHERE username = $1 AND id != $2',
                 [username, userId]
             );
-
+            
             if (existingUser.rows.length > 0) {
                 return res.status(400).json({ error: 'Username already exists.' });
             }
@@ -315,7 +359,7 @@ app.patch('/api/users/:id/reset-password', authenticateToken, isManager, async (
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-
+        
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -384,7 +428,7 @@ app.post('/api/leave-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-
+            
             if (targetUser.rows.length === 0) {
                 return res.status(400).json({ error: 'Employee not found.' });
             }
@@ -459,7 +503,7 @@ app.get('/api/leave-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY lr.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-
+        
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,
@@ -573,7 +617,7 @@ app.post('/api/advance-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-
+            
             if (employee.rows.length === 0) {
                 return res.status(404).json({ error: 'Employee not found.' });
             }
@@ -635,7 +679,7 @@ app.get('/api/advance-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY ar.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-
+        
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,
@@ -718,7 +762,12 @@ app.delete('/api/advance-requests/:id', authenticateToken, isManager, async (req
     }
 });
 
-// Start server
+// ==================== START SERVER ====================
+
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on port ${PORT}`);
+    console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 API URL: http://localhost:${PORT}/api`);
+    console.log(`✅ Health check: http://localhost:${PORT}/api/health`);
+    console.log(`🌐 CORS allowed origins:`, allowedOrigins);
 });
