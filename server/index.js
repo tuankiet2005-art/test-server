@@ -10,41 +10,10 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'Group_6';
+app.use(cors());
 
 // ==================== CORS CONFIGURATION ====================
-// Danh sách origins được phép
-const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://leave-management-qn2zpwb9m-tunakiet2005-arts-projects.vercel.app',
-    'https://leave-management-backend-oyyw.onrender.com'
-];
 
-// CORS middleware
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    
-    // Log để debug
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-    console.log('Origin:', origin);
-    
-    // Cho phép requests từ allowed origins
-    if (origin && allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-        res.header('Access-Control-Allow-Credentials', 'true');
-    }
-    
-    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    
-    // Handle preflight requests
-    if (req.method === 'OPTIONS') {
-        console.log('✅ Preflight request handled');
-        return res.sendStatus(200);
-    }
-    
-    next();
-});
 
 // Body parser middleware
 app.use(bodyParser.json());
