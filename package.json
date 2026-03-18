@@ -1,25 +1,20 @@
 {
   "name": "leave-management-system",
   "version": "1.0.0",
-  "description": "Leave management system with role-based permissions for employees and managers",
+  "description": "Leave management system",
   "main": "server/index.js",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && node index.js",
+    "server": "cd server && npm run dev",
     "client": "cd client && npm start",
+    "start": "cd server && npm start",
+    "build": "cd client && npm run build",
     "install-all": "npm install && cd server && npm install && cd ../client && npm install"
   },
-  "keywords": [
-    "leave",
-    "management",
-    "employee"
-  ],
+  "keywords": [],
   "author": "",
   "license": "ISC",
   "devDependencies": {
     "concurrently": "^8.2.2"
-  },
-  "dependencies": {
-    "all": "^0.0.0"
   }
 }

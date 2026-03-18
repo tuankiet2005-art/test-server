@@ -12,7 +12,19 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'Group_6';
 
 // Middleware
-app.use(cors());
+app.use(cors({
+    origin: [
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'https://your-frontend.vercel.app' // Thay bằng domain Vercel của bạn sau khi deploy
+    ],
+    credentials: true
+}));
+
+// Thêm route kiểm tra health
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -49,28 +61,28 @@ async function isManager(req, res, next) {
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        
+
         console.log('🔍 Login attempt:', username);
-        
+
         const result = await query(
             'SELECT id, username, password, name, role FROM users WHERE username = $1',
             [username]
         );
-        
+
         const user = result.rows[0];
-        
+
         if (!user) {
             console.log('❌ User not found');
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
-        
+
         console.log('✅ User found, comparing password...');
-        
+
         // SO SÁNH ĐÚNG CÁCH - DÙNG bcrypt.compareSync
         const isValid = bcrypt.compareSync(password, user.password);
-        
+
         console.log('🔍 Password valid:', isValid);
-        
+
         if (!isValid) {
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
@@ -103,12 +115,12 @@ app.get('/api/me', authenticateToken, async (req, res) => {
             'SELECT id, username, name, role FROM users WHERE id = $1',
             [req.user.id]
         );
-        
+
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found.' });
         }
-        
+
         res.json(user);
     } catch (err) {
         console.error('Get current user error:', err);
@@ -133,7 +145,7 @@ app.patch('/api/users/change-password', authenticateToken, async (req, res) => {
             'SELECT password FROM users WHERE id = $1',
             [req.user.id]
         );
-        
+
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -172,13 +184,13 @@ app.post('/api/users', authenticateToken, isManager, async (req, res) => {
             'SELECT id FROM users WHERE username = $1',
             [username]
         );
-        
+
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'Username already exists.' });
         }
 
         const hashedPassword = bcrypt.hashSync(password, 10);
-        
+
         const result = await query(
             `INSERT INTO users (username, password, name, role) 
              VALUES ($1, $2, $3, 'employee') 
@@ -213,7 +225,7 @@ app.post('/api/users/bulk-setup', authenticateToken, isManager, async (req, res)
                 'SELECT id FROM users WHERE username = $1',
                 [emp.username]
             );
-            
+
             if (existing.rows.length === 0) {
                 const result = await query(
                     `INSERT INTO users (username, password, name, role) 
@@ -261,7 +273,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-        
+
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -271,7 +283,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
                 'SELECT id FROM users WHERE username = $1 AND id != $2',
                 [username, userId]
             );
-            
+
             if (existingUser.rows.length > 0) {
                 return res.status(400).json({ error: 'Username already exists.' });
             }
@@ -303,7 +315,7 @@ app.patch('/api/users/:id/reset-password', authenticateToken, isManager, async (
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-        
+
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -372,7 +384,7 @@ app.post('/api/leave-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-            
+
             if (targetUser.rows.length === 0) {
                 return res.status(400).json({ error: 'Employee not found.' });
             }
@@ -447,7 +459,7 @@ app.get('/api/leave-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY lr.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-        
+
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,
@@ -561,7 +573,7 @@ app.post('/api/advance-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-            
+
             if (employee.rows.length === 0) {
                 return res.status(404).json({ error: 'Employee not found.' });
             }
@@ -623,7 +635,7 @@ app.get('/api/advance-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY ar.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-        
+
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,

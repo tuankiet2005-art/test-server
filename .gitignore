@@ -4,4 +4,5 @@ client/node_modules/
 server/database.json
 .DS_Store
 *.log
+*.env.production
 
