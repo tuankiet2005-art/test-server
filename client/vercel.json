@@ -5,11 +5,19 @@
   "installCommand": "npm install",
   "routes": [
     {
+      "src": "^/static/(.*)$",
+      "dest": "/static/$1",
+      "headers": {
+        "cache-control": "public, max-age=31536000, immutable"
+      }
+    },
+    {
+      "src": "^/(.*\\.(js|css|png|jpg|jpeg|gif|svg|ico|json|txt))$",
+      "dest": "/$1"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/"
+      "dest": "/index.html"
     }
-  ],
-  "env": {
-    "REACT_APP_API_URL": "https://leave-management-backend-oyyw.onrender.com/api"
-  }
+  ]
 }
