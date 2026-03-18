@@ -745,6 +745,115 @@ app.delete('/api/advance-requests/:id', authenticateToken, isManager, async (req
     }
 });
 
+// ==================== SALARY ROUTES ====================
+
+// Get own salary for employee
+app.get('/api/users/me/salary/:month', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const month = req.params.month; // format: YYYY-MM
+        
+        // Chuyển đổi month string thành date (ngày đầu tháng)
+        const monthDate = new Date(month + '-01');
+
+        const result = await query(
+            `SELECT amount FROM salaries 
+             WHERE user_id = $1 AND month = $2`,
+            [userId, monthDate]
+        );
+
+        const salary = result.rows[0] ? result.rows[0].amount : null;
+        
+        res.json({ month, salary });
+    } catch (err) {
+        console.error('Error in /api/users/me/salary/:month:', err);
+        res.status(500).json({ error: 'Error retrieving salary information: ' + err.message });
+    }
+});
+
+// Set salary for employee (Manager only)
+app.post('/api/users/:id/salary', authenticateToken, isManager, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        const { month, salary } = req.body; // month format: YYYY-MM
+
+        if (!month || salary === undefined || salary === null) {
+            return res.status(400).json({ error: 'Monthly salary is required.' });
+        }
+
+        if (salary < 0) {
+            return res.status(400).json({ error: 'Salaries cannot be negative.' });
+        }
+
+        const monthDate = new Date(month + '-01');
+
+        const result = await query(
+            `INSERT INTO salaries (user_id, month, amount) 
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, month) 
+             DO UPDATE SET amount = EXCLUDED.amount
+             RETURNING amount`,
+            [userId, monthDate, parseFloat(salary)]
+        );
+
+        res.json({
+            message: 'Salary setting successful.',
+            month,
+            salary: result.rows[0].amount
+        });
+    } catch (err) {
+        console.error('Set salary error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get salary for employee (Manager only)
+app.get('/api/users/:id/salary/:month', authenticateToken, isManager, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+        const month = req.params.month;
+        const monthDate = new Date(month + '-01');
+
+        const result = await query(
+            `SELECT amount FROM salaries 
+             WHERE user_id = $1 AND month = $2`,
+            [userId, monthDate]
+        );
+
+        const salary = result.rows[0] ? result.rows[0].amount : null;
+
+        res.json({ month, salary });
+    } catch (err) {
+        console.error('Get salary error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Get all salaries for employee (Manager only)
+app.get('/api/users/:id/salaries', authenticateToken, isManager, async (req, res) => {
+    try {
+        const userId = parseInt(req.params.id);
+
+        const result = await query(
+            `SELECT to_char(month, 'YYYY-MM') as month, amount 
+             FROM salaries 
+             WHERE user_id = $1 
+             ORDER BY month DESC`,
+            [userId]
+        );
+
+        const salaries = {};
+        result.rows.forEach(row => {
+            salaries[row.month] = row.amount;
+        });
+
+        res.json({ salaries });
+    } catch (err) {
+        console.error('Get all salaries error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // ==================== START SERVER ====================
 
 app.listen(PORT, () => {
