@@ -16,7 +16,7 @@ app.use(cors({
     origin: [
         'http://localhost:3000',
         'http://localhost:3001',
-        'https://your-frontend.vercel.app' // Thay bằng domain Vercel của bạn sau khi deploy
+        'https://leave-management-qn2zpwb9m-tuankiet2005-arts-projects.vercel.app' // Thay bằng domain Vercel của bạn sau khi deploy
     ],
     credentials: true
 }));
