@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'Group_6';
 
-// ==================== CORS - CHO PHÉP TẤT CẢ ====================
+// ==================== CORS ====================
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -20,22 +20,25 @@ app.use(cors({
     optionsSuccessStatus: 200
 }));
 
-// Xử lý preflight OPTIONS cho tất cả routes
 app.options('*', cors());
 
-// Body parser middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Middleware log requests (optional - để debug)
 app.use((req, res, next) => {
     console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
     next();
 });
 
+// ==================== HELPERS ====================
+
+// Convert YYYY-MM string to a safe DATE string for PostgreSQL (avoids timezone shift)
+function monthToDate(month) {
+    return month + '-01'; // Pass as plain string, pg handles it as DATE
+}
+
 // ==================== MIDDLEWARE ====================
 
-// Authentication middleware
 async function authenticateToken(req, res, next) {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -53,7 +56,6 @@ async function authenticateToken(req, res, next) {
     }
 }
 
-// Check if user is manager
 async function isManager(req, res, next) {
     if (req.user.role !== 'manager') {
         return res.status(403).json({ error: 'Manager access required.' });
@@ -63,19 +65,17 @@ async function isManager(req, res, next) {
 
 // ==================== TEST ROUTES ====================
 
-// Health check (không cần auth)
 app.get('/api/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
+    res.json({
+        status: 'OK',
         timestamp: new Date().toISOString(),
         message: 'Server is running!',
         environment: process.env.NODE_ENV || 'development'
     });
 });
 
-// Test CORS (không cần auth)
 app.get('/api/test', (req, res) => {
-    res.json({ 
+    res.json({
         message: 'CORS is working!',
         origin: req.headers.origin || 'No origin',
         method: req.method
@@ -84,32 +84,26 @@ app.get('/api/test', (req, res) => {
 
 // ==================== AUTH ROUTES ====================
 
-// Login
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        
+
         console.log('🔍 Login attempt:', username);
-        
+
         const result = await query(
             'SELECT id, username, password, name, role FROM users WHERE username = $1',
             [username]
         );
-        
+
         const user = result.rows[0];
-        
+
         if (!user) {
             console.log('❌ User not found');
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
-        
-        console.log('✅ User found, comparing password...');
-        
-        // So sánh password
+
         const isValid = bcrypt.compareSync(password, user.password);
-        
-        console.log('🔍 Password valid:', isValid);
-        
+
         if (!isValid) {
             return res.status(401).json({ error: 'Invalid username or password.' });
         }
@@ -135,19 +129,18 @@ app.post('/api/login', async (req, res) => {
     }
 });
 
-// Get current user
 app.get('/api/me', authenticateToken, async (req, res) => {
     try {
         const result = await query(
             'SELECT id, username, name, role FROM users WHERE id = $1',
             [req.user.id]
         );
-        
+
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found.' });
         }
-        
+
         res.json(user);
     } catch (err) {
         console.error('Get current user error:', err);
@@ -155,7 +148,6 @@ app.get('/api/me', authenticateToken, async (req, res) => {
     }
 });
 
-// Change password
 app.patch('/api/users/change-password', authenticateToken, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
@@ -172,7 +164,7 @@ app.patch('/api/users/change-password', authenticateToken, async (req, res) => {
             'SELECT password FROM users WHERE id = $1',
             [req.user.id]
         );
-        
+
         const user = result.rows[0];
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -197,7 +189,6 @@ app.patch('/api/users/change-password', authenticateToken, async (req, res) => {
 
 // ==================== USER ROUTES (Manager only) ====================
 
-// Create employee
 app.post('/api/users', authenticateToken, isManager, async (req, res) => {
     try {
         const { username, password, name } = req.body;
@@ -206,18 +197,17 @@ app.post('/api/users', authenticateToken, isManager, async (req, res) => {
             return res.status(400).json({ error: 'Username, password, and full name are required.' });
         }
 
-        // Check if username exists
         const existingUser = await query(
             'SELECT id FROM users WHERE username = $1',
             [username]
         );
-        
+
         if (existingUser.rows.length > 0) {
             return res.status(400).json({ error: 'Username already exists.' });
         }
 
         const hashedPassword = bcrypt.hashSync(password, 10);
-        
+
         const result = await query(
             `INSERT INTO users (username, password, name, role) 
              VALUES ($1, $2, $3, 'employee') 
@@ -232,7 +222,6 @@ app.post('/api/users', authenticateToken, isManager, async (req, res) => {
     }
 });
 
-// Bulk setup employees
 app.post('/api/users/bulk-setup', authenticateToken, isManager, async (req, res) => {
     try {
         const employeeList = [
@@ -252,7 +241,7 @@ app.post('/api/users/bulk-setup', authenticateToken, isManager, async (req, res)
                 'SELECT id FROM users WHERE username = $1',
                 [emp.username]
             );
-            
+
             if (existing.rows.length === 0) {
                 const result = await query(
                     `INSERT INTO users (username, password, name, role) 
@@ -274,7 +263,6 @@ app.post('/api/users/bulk-setup', authenticateToken, isManager, async (req, res)
     }
 });
 
-// Get all employees
 app.get('/api/users', authenticateToken, isManager, async (req, res) => {
     try {
         const result = await query(
@@ -290,7 +278,6 @@ app.get('/api/users', authenticateToken, isManager, async (req, res) => {
     }
 });
 
-// Update employee
 app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
@@ -300,7 +287,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-        
+
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -310,7 +297,7 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
                 'SELECT id FROM users WHERE username = $1 AND id != $2',
                 [username, userId]
             );
-            
+
             if (existingUser.rows.length > 0) {
                 return res.status(400).json({ error: 'Username already exists.' });
             }
@@ -332,7 +319,6 @@ app.put('/api/users/:id', authenticateToken, isManager, async (req, res) => {
     }
 });
 
-// Reset password
 app.patch('/api/users/:id/reset-password', authenticateToken, isManager, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
@@ -342,7 +328,7 @@ app.patch('/api/users/:id/reset-password', authenticateToken, isManager, async (
             'SELECT id FROM users WHERE id = $1',
             [userId]
         );
-        
+
         if (userExists.rows.length === 0) {
             return res.status(404).json({ error: 'Employee not found.' });
         }
@@ -368,7 +354,6 @@ app.patch('/api/users/:id/reset-password', authenticateToken, isManager, async (
     }
 });
 
-// Delete employee
 app.delete('/api/users/:id', authenticateToken, isManager, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
@@ -395,7 +380,6 @@ app.delete('/api/users/:id', authenticateToken, isManager, async (req, res) => {
 
 // ==================== LEAVE REQUESTS ====================
 
-// Create leave request
 app.post('/api/leave-requests', authenticateToken, async (req, res) => {
     try {
         const { date, reason, timePeriod = 'all day', userId } = req.body;
@@ -411,14 +395,13 @@ app.post('/api/leave-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-            
+
             if (targetUser.rows.length === 0) {
                 return res.status(400).json({ error: 'Employee not found.' });
             }
             targetUserId = parseInt(userId);
         }
 
-        // Check for existing request
         const existingRequest = await query(
             `SELECT id FROM leave_requests 
              WHERE user_id = $1 AND date = $2 AND time_period = $3`,
@@ -468,7 +451,6 @@ app.post('/api/leave-requests', authenticateToken, async (req, res) => {
     }
 });
 
-// Get leave requests
 app.get('/api/leave-requests', authenticateToken, async (req, res) => {
     try {
         let queryStr = `
@@ -486,7 +468,7 @@ app.get('/api/leave-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY lr.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-        
+
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,
@@ -507,7 +489,6 @@ app.get('/api/leave-requests', authenticateToken, async (req, res) => {
     }
 });
 
-// Update leave request status (Manager only)
 app.patch('/api/leave-requests/:id/status', authenticateToken, isManager, async (req, res) => {
     try {
         const requestId = parseInt(req.params.id);
@@ -552,7 +533,6 @@ app.patch('/api/leave-requests/:id/status', authenticateToken, isManager, async 
     }
 });
 
-// Delete leave request (Manager only)
 app.delete('/api/leave-requests/:id', authenticateToken, isManager, async (req, res) => {
     try {
         const requestId = parseInt(req.params.id);
@@ -575,7 +555,6 @@ app.delete('/api/leave-requests/:id', authenticateToken, isManager, async (req, 
 
 // ==================== ADVANCE REQUESTS ====================
 
-// Create advance request
 app.post('/api/advance-requests', authenticateToken, async (req, res) => {
     try {
         const { userId, amount, reason } = req.body;
@@ -600,7 +579,7 @@ app.post('/api/advance-requests', authenticateToken, async (req, res) => {
                 'SELECT id, name FROM users WHERE id = $1 AND role = $2',
                 [parseInt(userId), 'employee']
             );
-            
+
             if (employee.rows.length === 0) {
                 return res.status(404).json({ error: 'Employee not found.' });
             }
@@ -644,7 +623,6 @@ app.post('/api/advance-requests', authenticateToken, async (req, res) => {
     }
 });
 
-// Get advance requests
 app.get('/api/advance-requests', authenticateToken, async (req, res) => {
     try {
         let queryStr = `
@@ -662,7 +640,7 @@ app.get('/api/advance-requests', authenticateToken, async (req, res) => {
         queryStr += ` ORDER BY ar.submitted_at DESC`;
 
         const result = await query(queryStr, queryParams);
-        
+
         const requests = result.rows.map(row => ({
             id: row.id,
             userId: row.user_id,
@@ -680,7 +658,6 @@ app.get('/api/advance-requests', authenticateToken, async (req, res) => {
     }
 });
 
-// Update advance request status (Manager only)
 app.patch('/api/advance-requests/:id/status', authenticateToken, isManager, async (req, res) => {
     try {
         const requestId = parseInt(req.params.id);
@@ -724,7 +701,6 @@ app.patch('/api/advance-requests/:id/status', authenticateToken, isManager, asyn
     }
 });
 
-// Delete advance request (Manager only)
 app.delete('/api/advance-requests/:id', authenticateToken, isManager, async (req, res) => {
     try {
         const requestId = parseInt(req.params.id);
@@ -747,23 +723,21 @@ app.delete('/api/advance-requests/:id', authenticateToken, isManager, async (req
 
 // ==================== SALARY ROUTES ====================
 
-// Get own salary for employee
+// Get own salary for employee (MUST be before /api/users/:id/salary/:month)
 app.get('/api/users/me/salary/:month', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const month = req.params.month; // format: YYYY-MM
-        
-        // Chuyển đổi month string thành date (ngày đầu tháng)
-        const monthDate = new Date(month + '-01');
+        const monthDate = monthToDate(month);
 
         const result = await query(
             `SELECT amount FROM salaries 
-             WHERE user_id = $1 AND month = $2`,
+             WHERE user_id = $1 AND month = $2::date`,
             [userId, monthDate]
         );
 
-        const salary = result.rows[0] ? result.rows[0].amount : null;
-        
+        const salary = result.rows[0] ? parseFloat(result.rows[0].amount) : null;
+
         res.json({ month, salary });
     } catch (err) {
         console.error('Error in /api/users/me/salary/:month:', err);
@@ -778,18 +752,18 @@ app.post('/api/users/:id/salary', authenticateToken, isManager, async (req, res)
         const { month, salary } = req.body; // month format: YYYY-MM
 
         if (!month || salary === undefined || salary === null) {
-            return res.status(400).json({ error: 'Monthly salary is required.' });
+            return res.status(400).json({ error: 'Month and salary are required.' });
         }
 
-        if (salary < 0) {
-            return res.status(400).json({ error: 'Salaries cannot be negative.' });
+        if (parseFloat(salary) < 0) {
+            return res.status(400).json({ error: 'Salary cannot be negative.' });
         }
 
-        const monthDate = new Date(month + '-01');
+        const monthDate = monthToDate(month);
 
         const result = await query(
             `INSERT INTO salaries (user_id, month, amount) 
-             VALUES ($1, $2, $3)
+             VALUES ($1, $2::date, $3)
              ON CONFLICT (user_id, month) 
              DO UPDATE SET amount = EXCLUDED.amount
              RETURNING amount`,
@@ -797,9 +771,9 @@ app.post('/api/users/:id/salary', authenticateToken, isManager, async (req, res)
         );
 
         res.json({
-            message: 'Salary setting successful.',
+            message: 'Salary set successfully.',
             month,
-            salary: result.rows[0].amount
+            salary: parseFloat(result.rows[0].amount)
         });
     } catch (err) {
         console.error('Set salary error:', err);
@@ -807,20 +781,20 @@ app.post('/api/users/:id/salary', authenticateToken, isManager, async (req, res)
     }
 });
 
-// Get salary for employee (Manager only)
+// Get salary for single employee (Manager only)
 app.get('/api/users/:id/salary/:month', authenticateToken, isManager, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
         const month = req.params.month;
-        const monthDate = new Date(month + '-01');
+        const monthDate = monthToDate(month);
 
         const result = await query(
             `SELECT amount FROM salaries 
-             WHERE user_id = $1 AND month = $2`,
+             WHERE user_id = $1 AND month = $2::date`,
             [userId, monthDate]
         );
 
-        const salary = result.rows[0] ? result.rows[0].amount : null;
+        const salary = result.rows[0] ? parseFloat(result.rows[0].amount) : null;
 
         res.json({ month, salary });
     } catch (err) {
@@ -829,7 +803,7 @@ app.get('/api/users/:id/salary/:month', authenticateToken, isManager, async (req
     }
 });
 
-// Get all salaries for employee (Manager only)
+// Get all salaries history for employee (Manager only)
 app.get('/api/users/:id/salaries', authenticateToken, isManager, async (req, res) => {
     try {
         const userId = parseInt(req.params.id);
@@ -844,13 +818,70 @@ app.get('/api/users/:id/salaries', authenticateToken, isManager, async (req, res
 
         const salaries = {};
         result.rows.forEach(row => {
-            salaries[row.month] = row.amount;
+            salaries[row.month] = parseFloat(row.amount);
         });
 
         res.json({ salaries });
     } catch (err) {
         console.error('Get all salaries error:', err);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ==================== PAYROLL BULK ROUTE (Manager only) ====================
+// Replaces N individual /api/users/:id/salary/:month calls with a single request.
+// Returns salary + total approved advances + net balance for all employees in one month.
+
+app.get('/api/payroll/:month', authenticateToken, isManager, async (req, res) => {
+    try {
+        const month = req.params.month; // format: YYYY-MM
+
+        // Validate format
+        if (!/^\d{4}-\d{2}$/.test(month)) {
+            return res.status(400).json({ error: 'Invalid month format. Use YYYY-MM.' });
+        }
+
+        const monthDate = monthToDate(month);
+
+        const result = await query(
+            `SELECT
+                u.id            AS user_id,
+                u.name,
+                u.username,
+                s.amount        AS salary,
+                COALESCE(
+                    SUM(ar.amount) FILTER (
+                        WHERE ar.status = 'approved'
+                        AND to_char(ar.submitted_at, 'YYYY-MM') = $2
+                    ), 0
+                )               AS total_advanced
+             FROM users u
+             LEFT JOIN salaries s
+                ON s.user_id = u.id
+                AND s.month = $1::date
+             LEFT JOIN advance_requests ar
+                ON ar.user_id = u.id
+             WHERE u.role = 'employee'
+             GROUP BY u.id, u.name, u.username, s.amount
+             ORDER BY u.name`,
+            [monthDate, month]
+        );
+
+        const data = result.rows.map(row => ({
+            userId:        row.user_id,
+            name:          row.name,
+            username:      row.username,
+            salary:        row.salary ? parseFloat(row.salary) : null,
+            totalAdvanced: parseFloat(row.total_advanced),
+            netBalance:    row.salary
+                             ? parseFloat(row.salary) - parseFloat(row.total_advanced)
+                             : null
+        }));
+
+        res.json(data);
+    } catch (err) {
+        console.error('Payroll bulk fetch error:', err);
+        res.status(500).json({ error: 'Internal server error: ' + err.message });
     }
 });
 

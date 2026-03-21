@@ -38,8 +38,8 @@ function ManagerDashboard({ user, setUser }) {
     month: ''
   });
   const [attendanceDate, setAttendanceDate] = useState(new Date().toISOString().split('T')[0]);
-  const [monthlyAttendanceDate, setMonthlyAttendanceDate] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM format
-  const [salaryMonth, setSalaryMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM format
+  const [monthlyAttendanceDate, setMonthlyAttendanceDate] = useState(new Date().toISOString().slice(0, 7));
+  const [salaryMonth, setSalaryMonth] = useState(new Date().toISOString().slice(0, 7));
   const [advanceRequests, setAdvanceRequests] = useState([]);
   const [showAdvanceForm, setShowAdvanceForm] = useState(false);
   const [advanceForm, setAdvanceForm] = useState({
@@ -58,16 +58,18 @@ function ManagerDashboard({ user, setUser }) {
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [payrollData, setPayrollData] = useState([]); // New state for bulk payroll data
   const navigate = useNavigate();
 
   useEffect(() => {
     if (activeTab === 'leave-requests') {
       fetchLeaveRequests();
-      fetchEmployees(); // Need to display employee list in the creation form
+      fetchEmployees();
     } else if (activeTab === 'salary') {
       fetchEmployees();
-      fetchAdvanceRequests(); // Need to calculate advanced amount and display list
-      fetchLeaveRequests(); // Need to calculate number of days off
+      fetchAdvanceRequests();
+      fetchLeaveRequests();
+      fetchPayrollData(); // Fetch bulk payroll data
     } else if (activeTab === 'advance-salary') {
       fetchAdvanceRequests();
       fetchEmployees();
@@ -104,6 +106,20 @@ function ManagerDashboard({ user, setUser }) {
     } catch (err) {
       console.error('Error fetching advance requests:', err);
       setAdvanceRequests([]);
+    }
+  };
+
+  // New function to fetch bulk payroll data
+  const fetchPayrollData = async () => {
+    if (!salaryMonth) return;
+    
+    try {
+      const response = await api.get(`/payroll/${salaryMonth}`);
+      console.log('Payroll data:', response.data);
+      setPayrollData(response.data);
+    } catch (err) {
+      console.error('Error fetching payroll data:', err);
+      setPayrollData([]);
     }
   };
 
@@ -152,7 +168,7 @@ function ManagerDashboard({ user, setUser }) {
 
   const handleResetPassword = async (id, name) => {
     const newPassword = window.prompt(`Reset password for ${name}:\n(Leaving it blank will use the default password: 123456)`);
-    if (newPassword === null) return; // User cancelled
+    if (newPassword === null) return;
 
     try {
       const response = await api.patch(`/users/${id}/reset-password`, {
@@ -185,7 +201,6 @@ function ManagerDashboard({ user, setUser }) {
         reason: request.reason
       });
     } else {
-      // Old format - convert to new format for editing
       setLeaveRequestForm({
         date: request.startDate,
         timePeriod: request.startTimePeriod || 'all day',
@@ -307,7 +322,7 @@ function ManagerDashboard({ user, setUser }) {
       setShowAdvanceForm(false);
       setAdvanceForm({ userId: '', amount: '', reason: '' });
       fetchAdvanceRequests();
-      fetchEmployees(); // Refresh to get the latest employee list
+      fetchEmployees();
       alert('Salary advance request successfully created!');
     } catch (err) {
       setError(err.response?.data?.error || 'Error');
@@ -316,98 +331,15 @@ function ManagerDashboard({ user, setUser }) {
     }
   };
 
-  // Calculate the net remaining salary (consistent with the employee's current salary formula)
-  const calculateRemainingSalaryForForm = (employeeId, totalSalary, advanceAmount) => {
-    if (!totalSalary || totalSalary <= 0) {
-      return 0;
-    }
-
-    const today = new Date();
-    const [year, month] = salaryMonth.split('-').map(Number);
-    const daysInMonth = new Date(year, month, 0).getDate();
-    const currentDay = today.getDate();
+  const handleEditSalary = (employee) => {
+    // Get payroll data for this employee from bulk data
+    const employeePayroll = payrollData.find(data => data.userId === employee.id);
     
-    // Check if the selected month is the current month
-    const isCurrentMonth = year === today.getFullYear() && month === today.getMonth() + 1;
-    const daysToCalculate = isCurrentMonth ? currentDay : daysInMonth;
-
-    // Daily wage = Total salary / Total days in the month
-    const dailySalary = totalSalary / daysInMonth;
-
-    // Calculate the advanced amount (using values from the form)
-    const advance = parseFloat(advanceAmount) || 0;
-
-    // Calculate number of days off in the month (count up to today only if it is the current month)
-    const monthStart = new Date(year, month - 1, 1);
-    monthStart.setHours(0, 0, 0, 0);
-    const monthEnd = new Date(year, month, 0);
-    monthEnd.setHours(23, 59, 59, 999);
-    const todayStart = new Date(today);
-    todayStart.setHours(0, 0, 0, 0);
-    const endDate = isCurrentMonth ? todayStart : monthEnd;
-
-    let leaveShifts = 0; // Total number of off shifts
-    (leaveRequests || []).forEach(req => {
-      if (!req || req.status !== 'approved' || !req.date || req.userId !== employeeId) return;
-      
-      const dateStr = req.date;
-      const [reqYear, reqMonth, reqDay] = dateStr.split('-').map(Number);
-      const leaveDate = new Date(reqYear, reqMonth - 1, reqDay);
-      leaveDate.setHours(0, 0, 0, 0);
-      
-      // Only count days off within the selected month and <= endDate
-      if (leaveDate >= monthStart && leaveDate <= endDate) {
-        const timePeriod = (req.timePeriod || 'all day').toLowerCase();
-        if (timePeriod === 'all day') {
-          leaveShifts += 2; // Full day off = 2 shifts
-        } else if (timePeriod === 'morning' || timePeriod === 'afternoon' || 
-                   timePeriod === 'morning shift' || timePeriod === 'afternoon shift') {
-          leaveShifts += 1; // 1 shift off = 1 shift
-        }
-      }
+    setEditingSalary(employee);
+    setSalaryForm({ 
+      salary: employeePayroll?.salary || '', 
+      advanceAmount: employeePayroll?.totalAdvanced || '' 
     });
-    
-    // Calculate number of days off: 2 shifts = 1 day, 1 shift = 0.5 days
-    const leaveDays = leaveShifts / 2;
-
-   // Current salary = ((Total salary / Total days in the month) * Days from start of month to today) - Advanced amount - (Number of days off * Daily wage)
-    const leaveDeduction = leaveDays * dailySalary;
-    const currentSalary = (dailySalary * daysToCalculate) - advance - leaveDeduction;
-
-    return Math.ceil(Math.max(0, currentSalary));
-  };
-
-  const handleEditSalary = async (employee) => {
-    try {
-      const response = await api.get(`/users/${employee.id}/salary/${salaryMonth}`);
-      const salary = response.data.salary || '';
-      
-      /// Calculate the advanced amount for the month
-      let advanceAmount = 0;
-      if (advanceRequests && Array.isArray(advanceRequests)) {
-        const monthStart = new Date(salaryMonth + '-01');
-        monthStart.setHours(0, 0, 0, 0);
-        const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
-        monthEnd.setHours(23, 59, 59, 999);
-        
-        advanceAmount = advanceRequests
-          .filter(req => {
-            if (!req || req.userId !== employee.id || req.status !== 'approved') {
-              return false;
-            }
-            const reqDate = new Date(req.submittedAt);
-            reqDate.setHours(0, 0, 0, 0);
-            return reqDate >= monthStart && reqDate <= monthEnd;
-          })
-          .reduce((sum, req) => sum + (req.amount || 0), 0);
-      }
-      
-      setEditingSalary(employee);
-      setSalaryForm({ salary, advanceAmount: advanceAmount || '' });
-    } catch (err) {
-      setEditingSalary(employee);
-      setSalaryForm({ salary: '', advanceAmount: '' });
-    }
   };
 
   const handleSetSalary = async (e) => {
@@ -416,13 +348,13 @@ function ManagerDashboard({ user, setUser }) {
     setLoading(true);
 
     if (!salaryForm.salary) {
-    setError("Month and salary are required"); // ✅ ALREADY FIXED
-    setLoading(false);
-    return;
+      setError("Month and salary are required");
+      setLoading(false);
+      return;
     }
 
     try {
-      // Set lương
+      // Set salary
       await api.post(`/users/${editingSalary.id}/salary`, {
         month: salaryMonth,
         salary: parseFloat(salaryForm.salary)
@@ -431,7 +363,7 @@ function ManagerDashboard({ user, setUser }) {
       // Handle salary advance
       const advanceAmount = parseFloat(salaryForm.advanceAmount) || 0;
       
-      // Fetch advance requests mới nhất trước khi tính toán
+      // Fetch latest advance requests
       const latestAdvanceResponse = await api.get('/advance-requests');
       const latestAdvanceRequests = latestAdvanceResponse.data || [];
       
@@ -473,11 +405,11 @@ function ManagerDashboard({ user, setUser }) {
         }
       }
 
-      // Refresh data BEFORE closing the form to ensure state is updated
+      // Refresh data
       await fetchAdvanceRequests();
       await fetchEmployees();
+      await fetchPayrollData(); // Refresh payroll data
       
-      // Wait a moment to ensure state is updated
       await new Promise(resolve => setTimeout(resolve, 100));
       
       setEditingSalary(null);
@@ -513,7 +445,6 @@ function ManagerDashboard({ user, setUser }) {
     }
   };
 
-  // Check if employee is on leave for a specific date and shift
   const getEmployeeLeaveStatus = (employeeId, checkDate) => {
     const approvedRequests = leaveRequests.filter(
       req => req.userId === employeeId && req.status === 'approved'
@@ -523,7 +454,6 @@ function ManagerDashboard({ user, setUser }) {
     let afternoonLeave = false;
 
     for (const request of approvedRequests) {
-      // New format: single date
       if (request.date) {
         const requestDate = new Date(request.date).toISOString().split('T')[0];
         if (requestDate === checkDate) {
@@ -536,16 +466,13 @@ function ManagerDashboard({ user, setUser }) {
           }
         }
       }
-      // Old format: date range
       if (request.startDate && request.endDate) {
         const startDate = new Date(request.startDate).toISOString().split('T')[0];
         const endDate = new Date(request.endDate).toISOString().split('T')[0];
         if (checkDate >= startDate && checkDate <= endDate) {
-          // For old format, check startTimePeriod and endTimePeriod
           const startPeriod = request.startTimePeriod || 'all day';
           const endPeriod = request.endTimePeriod || 'all day';
           
-          // If it's the start date, use startPeriod
           if (checkDate === startDate) {
             if (startPeriod === 'all day' || startPeriod === 'morning') {
               morningLeave = true;
@@ -554,7 +481,6 @@ function ManagerDashboard({ user, setUser }) {
               afternoonLeave = true;
             }
           }
-          // If it's the end date, use endPeriod
           else if (checkDate === endDate) {
             if (endPeriod === 'all day' || endPeriod === 'morning') {
               morningLeave = true;
@@ -563,7 +489,6 @@ function ManagerDashboard({ user, setUser }) {
               afternoonLeave = true;
             }
           }
-          // If it's in between, assume all day
           else {
             morningLeave = true;
             afternoonLeave = true;
@@ -578,7 +503,6 @@ function ManagerDashboard({ user, setUser }) {
     };
   };
 
-  // Get attendance status for all employees
   const getAttendanceStatus = () => {
     return employees
       .map(employee => {
@@ -589,32 +513,27 @@ function ManagerDashboard({ user, setUser }) {
           afternoonStatus: leaveStatus.afternoon
         };
       })
-      .sort((a, b) => a.name.localeCompare(b.name, 'vi')); // Sort by name
+      .sort((a, b) => a.name.localeCompare(b.name, 'vi'));
   };
 
-  // Group employees by attendance status
   const getGroupedAttendance = () => {
     const statusList = getAttendanceStatus();
-    const presentFull = []; // Present for both shifts
-    const presentMorning = []; // Present for morning shift only
-    const presentAfternoon = []; // Present for afternoon shift only
-    const absent = []; // Absent for both shifts
+    const presentFull = [];
+    const presentMorning = [];
+    const presentAfternoon = [];
+    const absent = [];
 
     statusList.forEach(emp => {
       const morningPresent = emp.morningStatus === 'working';
       const afternoonPresent = emp.afternoonStatus === 'working';
       
       if (morningPresent && afternoonPresent) {
-       // Present for both shifts
         presentFull.push(emp);
       } else if (morningPresent && !afternoonPresent) {
-        // Present for morning shift only
         presentMorning.push(emp);
       } else if (!morningPresent && afternoonPresent) {
-        // Present for afternoon shift only
         presentAfternoon.push(emp);
       } else {
-        // Absent for both shifts
         absent.push(emp);
       }
     });
@@ -622,7 +541,6 @@ function ManagerDashboard({ user, setUser }) {
     return { presentFull, presentMorning, presentAfternoon, absent };
   };
 
-  // Get monthly attendance data
   const getMonthlyAttendance = () => {
     const [year, month] = monthlyAttendanceDate.split('-').map(Number);
     const daysInMonth = new Date(year, month, 0).getDate();
@@ -646,7 +564,6 @@ function ManagerDashboard({ user, setUser }) {
     }).sort((a, b) => a.name.localeCompare(b.name, 'vi'));
   };
 
-  // Get attendance statistics
   const getAttendanceStats = () => {
     const statusList = getAttendanceStatus();
     const total = statusList.length;
@@ -865,7 +782,6 @@ function ManagerDashboard({ user, setUser }) {
               </form>
             )}
 
-            {/* Filter */}
             <div style={{ 
               background: '#f9f9f9', 
               padding: '20px', 
@@ -925,29 +841,25 @@ function ManagerDashboard({ user, setUser }) {
 
             <div className="requests-list">
               {(() => {
-                // Filter leave request list
                 let filteredRequests = leaveRequests;
                 
-                // Filter by employee
                 if (leaveRequestFilters.employeeId) {
                   filteredRequests = filteredRequests.filter(
                     req => req.userId === parseInt(leaveRequestFilters.employeeId)
                   );
                 }
                 
-                // Filter by status
                 if (leaveRequestFilters.status) {
                   filteredRequests = filteredRequests.filter(
                     req => req.status === leaveRequestFilters.status
                   );
                 }
                 
-                // Filter by month
                 if (leaveRequestFilters.month) {
                   filteredRequests = filteredRequests.filter(req => {
                     const requestDate = req.date || req.startDate;
                     if (!requestDate) return false;
-                    const requestMonth = requestDate.substring(0, 7); // YYYY-MM
+                    const requestMonth = requestDate.substring(0, 7);
                     return requestMonth === leaveRequestFilters.month;
                   });
                 }
@@ -1185,7 +1097,7 @@ function ManagerDashboard({ user, setUser }) {
                             </button>
                           </div>
                         </td>
-                      </tr>
+                       </tr>
                     ))}
                   </tbody>
                 </table>
@@ -1336,7 +1248,7 @@ function ManagerDashboard({ user, setUser }) {
                             {day}
                           </th>
                         ))}
-                      </tr>
+                       </tr>
                     </thead>
                     <tbody>
                       {getMonthlyAttendance().map((employee) => (
@@ -1411,31 +1323,6 @@ function ManagerDashboard({ user, setUser }) {
                   </div>
                 </div>
 
-                {salaryForm.salary && editingSalary && (
-                  <div style={{ 
-                    padding: '12px', 
-                    background: '#e3f2fd', 
-                    borderRadius: '8px', 
-                    marginBottom: '15px',
-                    border: '1px solid #2196F3'
-                  }}>
-                    <strong>Net advance balance: </strong>
-                    <span style={{ 
-                      color: '#2196F3', 
-                      fontWeight: '600',
-                      fontSize: '16px'
-                    }}>
-                      {new Intl.NumberFormat('vi-VN').format(
-                        calculateRemainingSalaryForForm(
-                          editingSalary.id, 
-                          parseFloat(salaryForm.salary) || 0, 
-                          salaryForm.advanceAmount || 0
-                        )
-                      )} VNĐ
-                    </span>
-                  </div>
-                )}
-
                 <div style={{ display: 'flex', gap: '10px' }}>
                   <button type="submit" disabled={loading} className="primary-button">
                     {loading ? 'Saving...' : 'Save'}
@@ -1456,12 +1343,13 @@ function ManagerDashboard({ user, setUser }) {
             )}
 
             <SalaryTable 
-              key={`salary-${salaryMonth}-${Array.isArray(advanceRequests) ? advanceRequests.length : 0}-${Array.isArray(advanceRequests) ? advanceRequests.reduce((sum, r) => sum + (r?.id || 0), 0) : 0}`}
+              key={`salary-${salaryMonth}-${payrollData.length}`}
               employees={employees} 
               salaryMonth={salaryMonth} 
               onEditSalary={handleEditSalary}
               advanceRequests={advanceRequests}
               leaveRequests={leaveRequests}
+              payrollData={payrollData}
             />
           </div>
         )}
@@ -1604,8 +1492,7 @@ function ManagerDashboard({ user, setUser }) {
               </form>
             )}
 
-           {/* Filter */}
-            <div style={{ 
+           <div style={{ 
               background: '#f9f9f9', 
               padding: '20px', 
               borderRadius: '8px', 
@@ -1644,10 +1531,8 @@ function ManagerDashboard({ user, setUser }) {
             <div style={{ marginTop: '20px' }}>
               <h3 style={{ marginBottom: '15px', fontSize: '18px' }}>Salary advance history</h3>
               {(() => {
-                // Filter salary advance requests
                 let filteredRequests = advanceRequests;
                 
-                // Filter by employee
                 if (advanceRequestFilter.employeeId) {
                   filteredRequests = filteredRequests.filter(
                     req => req.userId === parseInt(advanceRequestFilter.employeeId)
@@ -1670,7 +1555,7 @@ function ManagerDashboard({ user, setUser }) {
                           <th>Reason</th>
                           <th>State</th>
                           <th>Action</th>
-                        </tr>
+                         </tr>
                       </thead>
                       <tbody>
                         {filteredRequests
@@ -1757,58 +1642,15 @@ function ManagerDashboard({ user, setUser }) {
   );
 }
 
-// Salary Table Component
-function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [], leaveRequests = [] }) {
-  const [salaries, setSalaries] = useState({});
-  const [loading, setLoading] = useState(true);
+// Salary Table Component - UPDATED to use bulk payroll data
+function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [], leaveRequests = [], payrollData = [] }) {
+  const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    const fetchSalaries = async () => {
-      const salaryData = {};
-      for (const employee of employees) {
-        try {
-          const response = await api.get(`/users/${employee.id}/salary/${salaryMonth}`);
-          salaryData[employee.id] = response.data.salary;
-        } catch (err) {
-          salaryData[employee.id] = null;
-        }
-      }
-      setSalaries(salaryData);
-      setLoading(false);
-    };
-
-    if (employees.length > 0) {
-      fetchSalaries();
-    } else {
-      setLoading(false);
-    }
-  }, [employees, salaryMonth, advanceRequests]);
-
-  // Calculate the advanced amount for each employee during the month.
-  const getAdvanceAmount = (employeeId) => {
-    if (!advanceRequests || !Array.isArray(advanceRequests)) {
-      return 0;
-    }
-    
-    const monthStart = new Date(salaryMonth + '-01');
-    monthStart.setHours(0, 0, 0, 0);
-    const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0);
-    monthEnd.setHours(23, 59, 59, 999);
-    
-    return advanceRequests
-      .filter(req => {
-        if (!req || req.userId !== employeeId || req.status !== 'approved') {
-          return false;
-        }
-        const reqDate = new Date(req.submittedAt);
-        reqDate.setHours(0, 0, 0, 0);
-        return reqDate >= monthStart && reqDate <= monthEnd;
-      })
-      .reduce((sum, req) => sum + (req.amount || 0), 0);
-  };
-
-  // Calculate the net remaining balance (consistent with the employee's current salary formula)
+  // Calculate remaining salary using payroll data
   const calculateRemainingSalary = (employeeId, totalSalary) => {
+    // Find the employee's data from the bulk response
+    const employeePayroll = payrollData.find(data => data.userId === employeeId);
+    
     if (!totalSalary || totalSalary <= 0) {
       return 0;
     }
@@ -1825,10 +1667,10 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
     // Daily wage = Total salary / Total days in the month
     const dailySalary = totalSalary / daysInMonth;
 
-    // Calculate the advanced amount for the month
-    const advanceAmount = getAdvanceAmount(employeeId);
+    // Get the advanced amount from bulk data
+    const advanceAmount = employeePayroll?.totalAdvanced || 0;
 
-    // Calculate the number of days off in the month (count up to today only if it is the current month)
+    // Calculate number of days off in the month
     const monthStart = new Date(year, month - 1, 1);
     monthStart.setHours(0, 0, 0, 0);
     const monthEnd = new Date(year, month, 0);
@@ -1837,7 +1679,7 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
     todayStart.setHours(0, 0, 0, 0);
     const endDate = isCurrentMonth ? todayStart : monthEnd;
 
-    let leaveShifts = 0; // Total off shifts
+    let leaveShifts = 0;
     (leaveRequests || []).forEach(req => {
       if (!req || req.status !== 'approved' || !req.date || req.userId !== employeeId) return;
       
@@ -1846,22 +1688,18 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
       const leaveDate = new Date(reqYear, reqMonth - 1, reqDay);
       leaveDate.setHours(0, 0, 0, 0);
       
-      // Only count days off within the selected month and <= endDate
       if (leaveDate >= monthStart && leaveDate <= endDate) {
         const timePeriod = (req.timePeriod || 'all day').toLowerCase();
         if (timePeriod === 'all day') {
-          leaveShifts += 2; /// Full day off = 2 shifts
+          leaveShifts += 2;
         } else if (timePeriod === 'morning' || timePeriod === 'afternoon' || 
                    timePeriod === 'morning shift' || timePeriod === 'afternoon shift') {
-          leaveShifts += 1; // 1 shift off = 1 shift
+          leaveShifts += 1;
         }
       }
     });
     
-    // Calculate the number of days off: 2 shifts = 1 day, 1 shift = 0.5 days
     const leaveDays = leaveShifts / 2;
-
-   // Current salary = ((Total salary / Total days in the month) × Days from the start of the month to today) - Advanced amount - (Number of days off × Daily wage)
     const leaveDeduction = leaveDays * dailySalary;
     const currentSalary = (dailySalary * daysToCalculate) - advanceAmount - leaveDeduction;
 
@@ -1869,7 +1707,7 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
   };
 
   if (loading) {
-    return <p className="empty-message">Loading...</p>;
+    return <p className="empty-message">Loading payroll data...</p>;
   }
 
   if (employees.length === 0) {
@@ -1890,8 +1728,10 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
       </thead>
       <tbody>
         {employees.map((employee) => {
-          const salary = salaries[employee.id] || 0;
-          const advanceAmount = getAdvanceAmount(employee.id);
+          // Find employee data from bulk response
+          const employeePayroll = payrollData.find(data => data.userId === employee.id);
+          const salary = employeePayroll?.salary || 0;
+          const advanceAmount = employeePayroll?.totalAdvanced || 0;
           const remaining = calculateRemainingSalary(employee.id, salary);
           
           return (
@@ -1937,4 +1777,3 @@ function SalaryTable({ employees, salaryMonth, onEditSalary, advanceRequests = [
 }
 
 export default ManagerDashboard;
-
