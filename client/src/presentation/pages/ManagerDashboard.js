@@ -141,33 +141,33 @@ function ManagerDashboard({ user, setUser }) {
       </header>
 
       <div className="dashboard-content">
-        <div className="tab-navigation">
+        <div className="tabs">
           <button
-            className={activeTab === 'employees' ? 'active' : ''}
+            className={`tab ${activeTab === 'employees' ? 'active' : ''}`}
             onClick={() => setActiveTab('employees')}
           >
             Employees
           </button>
           <button
-            className={activeTab === 'leave-requests' ? 'active' : ''}
+            className={`tab ${activeTab === 'leave-requests' ? 'active' : ''}`}
             onClick={() => setActiveTab('leave-requests')}
           >
             Leave Requests
           </button>
           <button
-            className={activeTab === 'advance-salary' ? 'active' : ''}
+            className={`tab ${activeTab === 'advance-salary' ? 'active' : ''}`}
             onClick={() => setActiveTab('advance-salary')}
           >
             Advance Requests
           </button>
           <button
-            className={activeTab === 'salary' ? 'active' : ''}
+            className={`tab ${activeTab === 'salary' ? 'active' : ''}`}
             onClick={() => setActiveTab('salary')}
           >
             Salary & Payroll
           </button>
           <button
-            className={activeTab === 'attendance' ? 'active' : ''}
+            className={`tab ${activeTab === 'attendance' ? 'active' : ''}`}
             onClick={() => setActiveTab('attendance')}
           >
             Attendance
