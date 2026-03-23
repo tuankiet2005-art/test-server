@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatCurrency } from '../../../shared/utils';
+import { formatCurrency } from '../../shared/utils';
 
 const PayrollTable = ({ payrollData, employees, onSetSalary }) => {
   const [selectedMonth, setSelectedMonth] = useState(

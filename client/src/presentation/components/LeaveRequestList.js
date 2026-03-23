@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDate } from '../../../shared/utils';
+import { formatDate } from '../../shared/utils';
 
 const LeaveRequestList = ({ requests, title = "Leave Requests" }) => {
   if (requests.length === 0) {

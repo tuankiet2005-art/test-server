@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatCurrency } from '../../../shared/utils';
+import { formatCurrency } from '../../shared/utils';
 
 const SalaryInfo = ({ salaryInfo, loading, error }) => {
   if (loading) {

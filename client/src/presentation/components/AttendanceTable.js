@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatDate } from '../../../shared/utils';
+import { formatDate } from '../../shared/utils';
 
 const AttendanceTable = ({ leaveRequests, employees, selectedDate, onDateChange }) => {
   const [viewMode, setViewMode] = useState('daily'); // daily or monthly

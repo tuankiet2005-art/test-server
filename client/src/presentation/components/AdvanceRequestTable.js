@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatDate, formatCurrency } from '../../../shared/utils';
+import { formatDate, formatCurrency } from '../../shared/utils';
 
 const AdvanceRequestTable = ({ requests, employees, onApprove, onReject, onCreateForEmployee, onEditAmount }) => {
   const [filters, setFilters] = useState({

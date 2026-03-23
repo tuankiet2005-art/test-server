@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDate, formatCurrency } from '../../../shared/utils';
+import { formatDate, formatCurrency } from '../../shared/utils';
 
 const AdvanceRequestList = ({ requests, title = "Advance Requests" }) => {
   if (requests.length === 0) {

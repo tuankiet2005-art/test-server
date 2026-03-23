@@ -1,6 +1,6 @@
 // Infrastructure layer - Repositories for API interactions
 
-import api from '../../services/auth';
+import api from '../services/auth';
 
 export class UserRepository {
   async getCurrentUser() {

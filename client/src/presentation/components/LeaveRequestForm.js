@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TIME_PERIOD_OPTIONS } from '../../../shared/utils';
+import { TIME_PERIOD_OPTIONS } from '../../shared/utils';
 
 const LeaveRequestForm = ({ onSubmit, onCancel, loading, error }) => {
   const [formData, setFormData] = useState({

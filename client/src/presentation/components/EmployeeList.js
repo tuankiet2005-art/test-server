@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatDate } from '../../../shared/utils';
+import { formatDate } from '../../shared/utils';
 
 const EmployeeList = ({ employees, onEdit, onDelete, onResetPassword }) => {
   if (employees.length === 0) {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { formatDate } from '../../../shared/utils';
+import { formatDate } from '../../shared/utils';
 
 const LeaveRequestTable = ({ requests, employees, onApprove, onReject, onCreateForEmployee }) => {
   const [filters, setFilters] = useState({
