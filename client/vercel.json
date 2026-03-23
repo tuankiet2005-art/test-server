@@ -1,13 +1,11 @@
 {
-  "buildCommand": "npm run build",
-  "installCommand": "npm install --legacy-peer-deps",
   "framework": "create-react-app",
-  "outputDirectory": "build",
   "build": {
     "env": {
       "CI": "false",
       "DISABLE_ESLINT_PLUGIN": "true",
-      "SKIP_PREFLIGHT_CHECK": "true"
+      "SKIP_PREFLIGHT_CHECK": "true",
+      "GENERATE_SOURCEMAP": "false"
     }
   }
 }
