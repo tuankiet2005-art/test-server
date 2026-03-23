@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './components/Login';
-import EmployeeDashboard from './components/EmployeeDashboard';
-import ManagerDashboard from './components/ManagerDashboard';
+import EmployeeDashboard from './presentation/pages/EmployeeDashboard';
+import ManagerDashboard from './presentation/pages/ManagerDashboard';
 import { getCurrentUser } from './services/auth';
 
 function App() {
